@@ -17,18 +17,18 @@ const (
 
 // ContentPart is a single part of a multi-part message (text or tool result).
 type ContentPart struct {
-	Type       string          `json:"type"`                  // "text" | "tool_result"
-	Text       string          `json:"text,omitempty"`
-	ToolCallID string          `json:"tool_call_id,omitempty"`
-	Content    string          `json:"content,omitempty"`     // for type=tool_result
-	IsError    bool            `json:"is_error,omitempty"`
+	Type       string `json:"type"` // "text" | "tool_result"
+	Text       string `json:"text,omitempty"`
+	ToolCallID string `json:"tool_call_id,omitempty"`
+	Content    string `json:"content,omitempty"` // for type=tool_result
+	IsError    bool   `json:"is_error,omitempty"`
 }
 
 // Message is a single conversation turn.
 type Message struct {
 	Role       Role          `json:"role"`
 	Content    string        `json:"content,omitempty"`
-	Parts      []ContentPart `json:"parts,omitempty"`      // multi-part content (optional)
+	Parts      []ContentPart `json:"parts,omitempty"`        // multi-part content (optional)
 	ToolCallID string        `json:"tool_call_id,omitempty"` // for role=tool
 	Name       string        `json:"name,omitempty"`         // tool name for role=tool
 	ToolCalls  []ToolCall    `json:"tool_calls,omitempty"`

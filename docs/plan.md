@@ -53,12 +53,23 @@ HTTP API `/v1/**` совместим с KMP Compose клиентом souz.
 - [x] **Существенное упрощение относительно Kotlin**: `RunSkillCommand` авторизует по факту "APPROVED-запись в реестре валидации для текущего hash бандла", а не по "выбран LLM-селектором в этом ходу". Из-за строгой послойности пакетов (`pkg/agent` не может импортировать `pkg/tools`, см. решение #9) протащить per-turn "разрешённый набор скиллов" через AgentContext в тул нельзя не сломав слои — а глобальная APPROVED-проверка сохраняет реальную границу безопасности (невалидированный/отклонённый скилл никогда не выполнится), просто без доп. ограничения "только то, что выбрано в этом ходу"
 - [x] По той же причине `toolloop` теперь принимает `map[string]*mcp.Client` отдельным параметром и матчит `serverName.toolName` как fallback, когда имя не найдено в статическом registry — MCP-тулы динамические (сервер может менять каталог), а registry статичен (собирается один раз в BuildGraph)
 
-### Фаза 5 — Интеграция
-- [ ] pkg/config/ — YAML config, SecureString
-- [ ] pkg/storage/ — filesystem session storage
-- [ ] pkg/http/ — /v1/** routes + SSE event sink (KMP compatible)
-- [ ] cmd/souz-agent/main.go — полный DI
-- [ ] ARM64 cross-compile: GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build ./cmd/souz-agent
+### Фаза 5 — Интеграция (✅ завершена)
+- [x] pkg/config/ — YAML config (gopkg.in/yaml.v3 — первая и единственная внешняя зависимость проекта, оправдана: полноценный вложенный YAML, ручной парсер непропорционален в отличие от плоского frontmatter скиллов) + SecureString
+- [x] pkg/storage/ — атомарное JSON-хранилище сессий, один файл на chatId (temp+rename, как everywhere else в проекте)
+- [x] pkg/http/ — /v1/** routes (сокращённый набор) + SSE event sink (net/http стримингом, без WebSocket-библиотеки)
+- [x] cmd/souz-agent/main.go — полный DI: provider → tools registry → skills registry/validation store → MCP-клиенты → BuildGraph → Executor → bus → channels → HTTP-сервер → graceful shutdown по SIGINT/SIGTERM
+- [x] ARM64 cross-compile: `GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -ldflags="-s -w"` — чисто, статический ELF-бинарь **7.0 MB** (цель ≤20MB из CLAUDE.md)
+- [x] Smoke test реального бинаря: `go build` → запуск с конфигом → `curl /health`, `POST /v1/chats`, `GET /v1/chats` работают end-to-end → `SIGINT` → чистое завершение, сессия сохранена атомарно на диск
+
+**Существенное упрощение HTTP API относительно Kotlin-спеки** (задокументировано в package doc `pkg/http/http.go`): реализован не route-for-route порт `BackendHttpRoutes.kt`/`BackendV1Dtos.kt`, а урезанный набор со схожей формой. Причины:
+- Kotlin-бэкенд — multi-tenant сервер (Postgres/memory storage modes, onboarding wizard, HTTP-managed settings/provider-keys, Telegram-bot-binding routes, choice/option subsystem) — ничего из этого не подходит однопользовательскому embedded-агенту на 256MB RAM
+- Проверено по исходникам: **KMP Compose desktop-клиент вообще не вызывает этот HTTP API** — гоняет агента in-process. Живого потребителя, которому нужна байтовая совместимость, не существует
+- Реализовано: `GET /health`, `GET/POST /v1/chats`, `GET/POST /v1/chats/{chatId}/messages`, `GET /v1/chats/{chatId}/events` (SSE), `POST /v1/chats/{chatId}/cancel-active`. Сохранены: `/v1/**`-неймспейс, camelCase JSON-поля, error envelope `{"error":{"code","message"}}`, словарь событий `message.delta`/`execution.started`/`execution.finished`/`execution.failed`/`execution.cancelled`/`tool.call.*`
+- Не реализовано (сознательно): `/v1/onboarding/**`, `/v1/me/settings`, `/v1/me/provider-keys` (это всё — config.yaml на однопользовательском embedded-агенте), `/v1/chats/{chatId}/telegram-bot` (Telegram настраивается через config.yaml, не per-chat HTTP), `/v1/options/**` (choice/option-фича не реализована в графе), title/archive/unarchive для чатов, pagination cursors (в самом Kotlin они всё равно всегда `null` — это уже заглушка в оригинале)
+- **Транспорт живых событий — настоящий SSE** (`text/event-stream`, `net/http` + `http.Flusher`), не WebSocket, хотя Kotlin-оригинал использует WS+polling. CLAUDE.md и docs/plan.md сами называют это "SSE event sink" — решение уже задокументировано в проекте, я его не изобретал, а честно реализовал буквально (SSE не требует WS-библиотеки, меньше кода, меньше веса бинаря)
+- `EventSink.EmitError`/`.Done()` (были объявлены в интерфейсе, но ни один узел графа их не вызывал) теперь используются по назначению: HTTP-хендлер сам вызывает их вокруг `Executor.Execute` для событий `execution.failed`/`execution.finished` — это уровень целого хода, а не отдельного узла
+
+**SecureString — только редакция в логах, не шифрование на диске** (задокументировано в package doc `pkg/config/config.go`): Kotlin-оригинал шифрует ключи AES-256-GCM с PBKDF2, потому что это multi-tenant сервер, хранящий секреты многих пользователей. souz-go — локальный процесс одного пользователя; config.yaml и так под той же защитой, что и любой другой локальный секрет-файл (0600, enforced в `config.Save`). Полноценное шифрование добавило бы жизненный цикл master-key без соответствующей угрозы на этом target.
 
 ## Архитектурные решения
 

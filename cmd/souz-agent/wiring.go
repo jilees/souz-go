@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"log/slog"
 
+	"path/filepath"
+
 	"souz.ru/souz-go/pkg/bus"
 	"souz.ru/souz-go/pkg/channels"
 	"souz.ru/souz-go/pkg/channels/telegram"
@@ -12,6 +14,7 @@ import (
 	"souz.ru/souz-go/pkg/mcp"
 	"souz.ru/souz-go/pkg/providers"
 	"souz.ru/souz-go/pkg/providers/anthropic"
+	"souz.ru/souz-go/pkg/providers/codex"
 	"souz.ru/souz-go/pkg/providers/openai_compat"
 	skillsregistry "souz.ru/souz-go/pkg/skills/registry"
 	"souz.ru/souz-go/pkg/skills/validation"
@@ -37,9 +40,19 @@ func buildProvider(cfg *config.Config) (providers.LLMProvider, error) {
 			APIKey:  cfg.OpenAICompat.APIKey.Value(),
 			BaseURL: cfg.OpenAICompat.BaseURL,
 		}, nil
+	case "codex":
+		return &codex.Provider{Store: codex.NewTokenStore(codexTokenPath(cfg))}, nil
 	default:
-		return nil, fmt.Errorf("unknown provider %q (expected \"anthropic\" or \"openai_compat\")", cfg.Provider)
+		return nil, fmt.Errorf("unknown provider %q (expected \"anthropic\", \"openai_compat\", or \"codex\")", cfg.Provider)
 	}
+}
+
+// codexTokenPath is where the Codex OAuth token is persisted — separate
+// from config.yaml, since (unlike a static API key) it's rewritten by the
+// agent itself on every refresh. Shared between buildProvider and the
+// `-codex-login` flow in main.go, so both always agree on the location.
+func codexTokenPath(cfg *config.Config) string {
+	return filepath.Join(cfg.DataDir, "codex-token.json")
 }
 
 // buildToolRegistry assembles every local tools.Tool the config enables.

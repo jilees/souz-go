@@ -23,6 +23,7 @@ import (
 	"souz.ru/souz-go/pkg/config"
 	"souz.ru/souz-go/pkg/graph"
 	souzhttp "souz.ru/souz-go/pkg/http"
+	"souz.ru/souz-go/pkg/providers/codex"
 	"souz.ru/souz-go/pkg/skills/bundle"
 	skillsregistry "souz.ru/souz-go/pkg/skills/registry"
 	"souz.ru/souz-go/pkg/skills/validation"
@@ -37,6 +38,7 @@ func main() {
 	})))
 
 	configPath := flag.String("config", config.DefaultPath(), "path to config.yaml")
+	codexLogin := flag.Bool("codex-login", false, "link a ChatGPT account for the Codex provider, then exit")
 	flag.Parse()
 
 	cfg, err := config.Load(*configPath)
@@ -47,6 +49,15 @@ func main() {
 
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
+
+	if *codexLogin {
+		store := codex.NewTokenStore(codexTokenPath(cfg))
+		if err := codex.Login(ctx, nil, store, os.Stdout); err != nil {
+			slog.Error("codex login failed", "error", err)
+			os.Exit(1)
+		}
+		return
+	}
 
 	if err := run(ctx, cfg); err != nil {
 		slog.Error("souz-agent exited with error", "error", err)

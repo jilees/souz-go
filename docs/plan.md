@@ -71,6 +71,17 @@ HTTP API `/v1/**` совместим с KMP Compose клиентом souz.
 
 **SecureString — только редакция в логах, не шифрование на диске** (задокументировано в package doc `pkg/config/config.go`): Kotlin-оригинал шифрует ключи AES-256-GCM с PBKDF2, потому что это multi-tenant сервер, хранящий секреты многих пользователей. souz-go — локальный процесс одного пользователя; config.yaml и так под той же защитой, что и любой другой локальный секрет-файл (0600, enforced в `config.Save`). Полноценное шифрование добавило бы жизненный цикл master-key без соответствующей угрозы на этом target.
 
+### Codex-провайдер (ChatGPT-подписка, вне исходных пяти фаз)
+
+- [x] `pkg/providers/codex/` — третий `providers.LLMProvider`, поверх OpenAI Responses API (не Chat Completions — другой протокол, отдельный от `openai_compat`) с авторизацией через OAuth Device Authorization Flow подписки ChatGPT, а не статичный API-ключ.
+- Портирован напрямую в Go, а не оставлен JVM-сайдкаром: реальный флоу оказался проще, чем можно было предположить — Device Code Grant (RFC 8628) с ручным вводом кода пользователем, без браузерного redirect и без локального callback-сервера (в отличие от MCP OAuth в том же Kotlin-проекте, который именно так и устроен). Весь код самодостаточен (`CodexOAuthService`/`CodexChatAPI` зависят только от 4 полей токена в `SettingsProvider`, никаких desktop-API), поэтому вынос на Go был явно предпочтительнее JVM-сайдкара — второй вариант вернул бы то самое ограничение (JVM не помещается в 256MB), ради обхода которого затевался весь проект.
+- `oauth.go` — `StartDeviceFlow`/`PollForAuthorization`/`ExchangeCode`/`RefreshAccessToken`, извлечение `chatgpt_account_id` из payload JWT (base64-декод без проверки подписи — как и в оригинале, это просто чтение claim, не авторизация).
+- `token.go` — токены (`access/refresh/accountId/expiresAt`) хранятся **не** в `config.yaml`, а в отдельном JSON-файле `{DataDir}/codex-token.json` (atomic write), потому что в отличие от статичного API-ключа этот файл переписывается самим агентом при каждом рефреше (~раз в час) — `config.yaml` осознанно не переписывается программно нигде в проекте.
+- Рефреш ленивый (перед каждым запросом, буфер 300с до истечения — без фонового таймера), с fallback на текущий (пусть просроченный) токен при сетевой ошибке рефреша — не валит ход из-за временного сбоя.
+- `request.go`/`stream.go` — маппинг `providers.ChatRequest`↔Responses API items (`message`/`function_call`/`function_call_output`) и разбор SSE (`response.output_item.done`/`response.completed`/`response.failed`). Codex не отдаёт по-токенные дельты текста даже в "стриминге" — только целые items и финальный `response.completed`, поэтому `onChunk` в `ChatStream` никогда не вызывается. Это не Go-упрощение, а точное соответствие поведению оригинального `CodexChatAPI`.
+- `cmd/souz-agent`: `case "codex"` в `buildProvider` (wiring.go) + флаг `-codex-login` в `main.go`, который прогоняет `codex.Login(...)` интерактивно в терминале (печатает код и ссылку, поллит, сохраняет токен) и завершается, не поднимая весь агент.
+- Тесты — только через `httptest` (URL-константы эндпоинтов сделаны `var`, а не `const`, специально для подмены в тестах, как `BaseURL` у остальных провайдеров), включая полный `Login` end-to-end и рефреш посреди `Chat()`. Реальный OpenAI OAuth в тестах не используется.
+
 ## Архитектурные решения
 
 1. **Message Bus**: буферизованные каналы (chan InboundMessage / chan OutboundMessage)

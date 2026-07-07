@@ -49,7 +49,7 @@ func TestBuildGraph_ToolCallThenFinalAnswer(t *testing.T) {
 	}}
 	registry := map[string]tools.Tool{"get_weather": &fakeTool{name: "get_weather", result: "22C"}}
 
-	def, start := BuildGraph(provider, registry)
+	def, start := BuildGraph(provider, registry, nil, SkillsConfig{})
 	runner := &graph.Runner{}
 
 	sink := &fakeEventSink{}

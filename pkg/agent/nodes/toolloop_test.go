@@ -31,7 +31,7 @@ var _ tools.Tool = (*fakeTool)(nil)
 func TestToolLoop_ExecutesPendingCalls(t *testing.T) {
 	weather := &fakeTool{name: "get_weather", result: "22C sunny"}
 	registry := map[string]tools.Tool{"get_weather": weather}
-	node := NewToolLoop(registry)
+	node := NewToolLoop(registry, nil)
 
 	in := agent.AgentContext{
 		History: []providers.Message{
@@ -64,7 +64,7 @@ func TestToolLoop_ExecutesPendingCalls(t *testing.T) {
 }
 
 func TestToolLoop_UnknownToolProducesErrorResult(t *testing.T) {
-	node := NewToolLoop(map[string]tools.Tool{})
+	node := NewToolLoop(map[string]tools.Tool{}, nil)
 
 	in := agent.AgentContext{
 		History: []providers.Message{
@@ -94,7 +94,7 @@ func TestToolLoop_UnknownToolProducesErrorResult(t *testing.T) {
 
 func TestToolLoop_ToolErrorIsSurfacedAsResult(t *testing.T) {
 	failing := &fakeTool{name: "boom", err: errors.New("kaboom")}
-	node := NewToolLoop(map[string]tools.Tool{"boom": failing})
+	node := NewToolLoop(map[string]tools.Tool{"boom": failing}, nil)
 
 	in := agent.AgentContext{
 		History: []providers.Message{
@@ -118,7 +118,7 @@ func TestToolLoop_ToolErrorIsSurfacedAsResult(t *testing.T) {
 }
 
 func TestToolLoop_NoPendingCallsIsNoop(t *testing.T) {
-	node := NewToolLoop(map[string]tools.Tool{})
+	node := NewToolLoop(map[string]tools.Tool{}, nil)
 
 	in := agent.AgentContext{
 		History: []providers.Message{

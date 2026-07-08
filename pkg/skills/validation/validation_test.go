@@ -67,14 +67,17 @@ func TestStatic_PassesBenignContent(t *testing.T) {
 }
 
 type fakeProvider struct {
-	resp *providers.ChatResponse
-	err  error
+	resp   *providers.ChatResponse
+	err    error
+	gotReq providers.ChatRequest
 }
 
-func (f *fakeProvider) Chat(context.Context, providers.ChatRequest) (*providers.ChatResponse, error) {
+func (f *fakeProvider) Chat(_ context.Context, req providers.ChatRequest) (*providers.ChatResponse, error) {
+	f.gotReq = req
 	return f.resp, f.err
 }
-func (f *fakeProvider) ChatStream(context.Context, providers.ChatRequest, func(string)) (*providers.ChatResponse, error) {
+func (f *fakeProvider) ChatStream(_ context.Context, req providers.ChatRequest, _ func(string)) (*providers.ChatResponse, error) {
+	f.gotReq = req
 	return f.resp, f.err
 }
 
@@ -82,7 +85,7 @@ func TestValidate_StructuralRejectionSkipsLLM(t *testing.T) {
 	b := mustBundle(t, []bundle.File{{Path: bundle.SkillMDPath, Content: []byte("---\nname: Demo\ndescription: d\n---\n   ")}})
 	provider := &fakeProvider{err: errors.New("should not be called")}
 
-	rec := Validate(context.Background(), provider, b, DefaultPolicy())
+	rec := Validate(context.Background(), provider, b, DefaultPolicy(), "gpt-5")
 	if rec.Status != StatusRejected {
 		t.Errorf("expected StatusRejected, got %v", rec.Status)
 	}
@@ -93,12 +96,15 @@ func TestValidate_ApprovesOnHighConfidenceApprove(t *testing.T) {
 	verdict := `{"decision":"APPROVE","confidence":0.9,"riskLevel":"low","reasons":["looks fine"]}`
 	provider := &fakeProvider{resp: &providers.ChatResponse{Content: verdict}}
 
-	rec := Validate(context.Background(), provider, b, DefaultPolicy())
+	rec := Validate(context.Background(), provider, b, DefaultPolicy(), "gpt-5")
 	if rec.Status != StatusApproved {
 		t.Errorf("expected StatusApproved, got %v (reasons=%v)", rec.Status, rec.Reasons)
 	}
 	if rec.BundleHash != b.Hash() || rec.SkillID != b.SkillID {
 		t.Errorf("record identity mismatch: %+v", rec)
+	}
+	if provider.gotReq.Model != "gpt-5" {
+		t.Errorf("expected the configured model to be passed through, got %q", provider.gotReq.Model)
 	}
 }
 
@@ -107,7 +113,7 @@ func TestValidate_RejectsOnLowConfidenceApprove(t *testing.T) {
 	verdict := `{"decision":"APPROVE","confidence":0.2,"riskLevel":"medium","reasons":["unsure"]}`
 	provider := &fakeProvider{resp: &providers.ChatResponse{Content: verdict}}
 
-	rec := Validate(context.Background(), provider, b, DefaultPolicy())
+	rec := Validate(context.Background(), provider, b, DefaultPolicy(), "gpt-5")
 	if rec.Status != StatusRejected {
 		t.Errorf("expected StatusRejected for low confidence, got %v", rec.Status)
 	}
@@ -117,7 +123,7 @@ func TestValidate_FailsClosedOnProviderError(t *testing.T) {
 	b := mustBundle(t, []bundle.File{okSkillMD()})
 	provider := &fakeProvider{err: errors.New("boom")}
 
-	rec := Validate(context.Background(), provider, b, DefaultPolicy())
+	rec := Validate(context.Background(), provider, b, DefaultPolicy(), "gpt-5")
 	if rec.Status != StatusRejected {
 		t.Errorf("expected StatusRejected on provider error, got %v", rec.Status)
 	}
@@ -127,7 +133,7 @@ func TestValidate_FailsClosedOnUnparseableResponse(t *testing.T) {
 	b := mustBundle(t, []bundle.File{okSkillMD()})
 	provider := &fakeProvider{resp: &providers.ChatResponse{Content: "sure, looks good to me!"}}
 
-	rec := Validate(context.Background(), provider, b, DefaultPolicy())
+	rec := Validate(context.Background(), provider, b, DefaultPolicy(), "gpt-5")
 	if rec.Status != StatusRejected {
 		t.Errorf("expected StatusRejected on unparseable output, got %v", rec.Status)
 	}

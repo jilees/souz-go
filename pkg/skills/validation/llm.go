@@ -33,8 +33,16 @@ When in doubt, reject with a low confidence rather than approve.`
 // error: transport failures, non-JSON responses, and malformed JSON all
 // fail closed into a REJECT verdict with a explanatory finding, so a flaky
 // or misbehaving provider can't accidentally approve an unreviewed skill.
-func ValidateWithLLM(ctx context.Context, provider providers.LLMProvider, b *bundle.SkillBundle, policy Policy) LLMVerdict {
+//
+// model must be the same chat model configured for the agent's normal
+// turns — see the equivalent note on selection.Select for why leaving
+// ChatRequest.Model empty is not a safe default here: it silently switches
+// to the provider's own hardcoded fallback model, which for a reasoning
+// model reliably exhausts MaxTokens on hidden reasoning and fails every
+// validation closed regardless of the skill's actual content.
+func ValidateWithLLM(ctx context.Context, provider providers.LLMProvider, b *bundle.SkillBundle, policy Policy, model string) LLMVerdict {
 	resp, err := provider.Chat(ctx, providers.ChatRequest{
+		Model:        model,
 		SystemPrompt: llmValidatorSystemPrompt,
 		Messages: []providers.Message{
 			{Role: providers.RoleUser, Content: buildReviewPrompt(b, policy)},

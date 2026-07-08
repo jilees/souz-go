@@ -86,7 +86,10 @@ func DefaultPolicy() Policy {
 //
 // Callers are responsible for the cache: check Store.Get first, and call
 // Store.InvalidateOthers/Store.Save around this as appropriate.
-func Validate(ctx context.Context, provider providers.LLMProvider, b *bundle.SkillBundle, policy Policy) Record {
+//
+// model is passed through to ValidateWithLLM — see its doc comment for why
+// this can't default to the provider's own fallback model.
+func Validate(ctx context.Context, provider providers.LLMProvider, b *bundle.SkillBundle, policy Policy, model string) Record {
 	rec := Record{
 		SkillID:       b.SkillID,
 		BundleHash:    b.Hash(),
@@ -109,7 +112,7 @@ func Validate(ctx context.Context, provider providers.LLMProvider, b *bundle.Ski
 		return rec
 	}
 
-	verdict := ValidateWithLLM(ctx, provider, b, policy)
+	verdict := ValidateWithLLM(ctx, provider, b, policy, model)
 	rec.Confidence = verdict.Confidence
 	rec.Reasons = verdict.Reasons
 	if len(verdict.Findings) > 0 {

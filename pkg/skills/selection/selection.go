@@ -40,12 +40,20 @@ Respond with ONLY a single JSON object, no markdown fences, no prose, matching e
 // response it fails closed to an empty selection rather than an error,
 // since skill activation is best-effort by design; only a provider-level
 // failure (network, auth, ...) is returned as a Go error.
-func Select(ctx context.Context, provider providers.LLMProvider, userMessage string, candidates []Candidate) (Result, error) {
+//
+// model must be the same chat model configured for the agent's normal
+// turns: ChatRequest.Model left empty falls back to each provider's own
+// default (e.g. openai_compat's "gpt-5-nano"), which is not necessarily
+// the model the user's provider key/account is even set up for, and — for
+// reasoning models — can silently burn the whole token budget on hidden
+// reasoning before ever emitting the required JSON.
+func Select(ctx context.Context, provider providers.LLMProvider, userMessage, model string, candidates []Candidate) (Result, error) {
 	if len(candidates) == 0 {
 		return Result{}, nil
 	}
 
 	resp, err := provider.Chat(ctx, providers.ChatRequest{
+		Model:        model,
 		SystemPrompt: systemPrompt,
 		Messages: []providers.Message{
 			{Role: providers.RoleUser, Content: buildSelectionPrompt(userMessage, candidates)},

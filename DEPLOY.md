@@ -204,6 +204,48 @@ adb shell "/data/souz-agent/souz-agent -config /data/souz-agent/config.yaml -cod
 
 ---
 
+## Скиллы
+
+Скилл — директория с `SKILL.md` (YAML-frontmatter `name`/`description` + markdown-инструкции), опционально с дополнительными файлами. Устанавливается двумя способами:
+
+- **Loose-скилл** — просто положить директорию в `{dataDir}/skills/{skillId}/SKILL.md` на устройстве. Реестр читает каталог заново при каждом ходе (`os.ReadDir`), рестарт сервиса не нужен.
+- Через `registry.SaveSkillBundle` (content-addressed `bundles/{hash}/`) — актуально для программной установки, для ручного деплоя проще loose.
+
+```bash
+adb shell "mkdir -p /data/souz-agent/state/skills/<skillId>"
+adb push SKILL.md /data/souz-agent/state/skills/<skillId>/SKILL.md
+```
+
+### Валидация
+
+Активация скилла требует прохождения пайплайна **structural → static (regex) → LLM-проверка** — он запускается **автоматически**, при первом сообщении, которое LLM-селектор сочтёт релевантным описанию скилла (`description` в frontmatter). Скилл не подключается к системному промпту, пока не получит `APPROVED`.
+
+Результат кэшируется на диске:
+```
+{dataDir}/skill-validations/{skillId}/policies/{policyVersion}/{bundleHash}.json
+```
+
+Посмотреть вердикт:
+```bash
+adb shell "find /data/souz-agent/state/skill-validations -type f -exec cat {} \;" | python3 -m json.tool
+```
+
+Поле `status`: `APPROVED` / `REJECTED` (+ `reasons`/`findings` с объяснением). Пока хэш содержимого `SKILL.md` не изменился и запись `APPROVED` — повторная валидация не идёт. Форсировать перевалидацию (например, после правки промпта):
+```bash
+adb shell "rm /data/souz-agent/state/skill-validations/{skillId}/policies/1/{bundleHash}.json"
+```
+— на следующем подходящем сообщении пайплайн прогонится заново.
+
+**Важно (исправленный баг):** до текущей версии `selection.Select` и `validation.ValidateWithLLM` не передавали в `ChatRequest` сконфигурированную модель (`config.yaml`'s `model`) — из-за этого запрос уходил на захардкоженный фолбэк `openai_compat.defaultModel = "gpt-5-nano"` вместо реальной модели пользователя. Для reasoning-моделей это означало, что весь `maxTokens`-бюджет валидатора сжирался на скрытый reasoning, ответ обрывался до JSON-вердикта, и **любой** скилл получал fail-closed `REJECTED` независимо от содержимого. Пофикшено — `nodes.SkillsConfig.Model` (= `cfg.Model` из `config.yaml`) теперь пробрасывается в оба вызова.
+
+### Ограничения рантайма на SberBoom
+
+На устройстве **нет `bash`** (только BusyBox `sh`) и **нет `curl`** в `PATH` агента (только `wget` от BusyBox). Для `RunSkillCommand`:
+- `runtime: "bash"` **не будет работать** — упадёт с `"bash" is not available on this system`.
+- Используйте `runtime: "process"` с прямым `argv` (например `["wget","-q","-O","-","--header","Content-Type: application/json","--post-data","{...}","http://..."]`) — без обёртки в `sh -c` это ещё и избавляет от проблем с экранированием кавычек в JSON, который LLM подставляет в команду.
+
+---
+
 ## Управление сервисом
 
 ```bash

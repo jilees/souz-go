@@ -88,6 +88,7 @@ func run(ctx context.Context, cfg *config.Config) error {
 			Registry:        skillsReg,
 			ValidationStore: validationStore,
 			Policy:          validation.DefaultPolicy(),
+			Model:           cfg.Model,
 		}
 	}
 

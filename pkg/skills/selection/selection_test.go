@@ -35,7 +35,7 @@ func TestSelect_ReturnsKnownSelectedIDs(t *testing.T) {
 		Content: `{"selectedSkillIds":["weather-lookup"],"rationale":"user asked about weather"}`,
 	}}
 
-	result, err := Select(context.Background(), provider, "what's the weather in Tallinn?", candidates())
+	result, err := Select(context.Background(), provider, "what's the weather in Tallinn?", "gpt-5", candidates())
 	if err != nil {
 		t.Fatalf("Select: %v", err)
 	}
@@ -45,6 +45,9 @@ func TestSelect_ReturnsKnownSelectedIDs(t *testing.T) {
 	if result.Rationale == "" {
 		t.Error("expected a rationale")
 	}
+	if provider.gotReq.Model != "gpt-5" {
+		t.Errorf("expected the configured model to be passed through, got %q", provider.gotReq.Model)
+	}
 }
 
 func TestSelect_DropsUnknownIDs(t *testing.T) {
@@ -52,7 +55,7 @@ func TestSelect_DropsUnknownIDs(t *testing.T) {
 		Content: `{"selectedSkillIds":["weather-lookup","made-up-skill"],"rationale":"..."}`,
 	}}
 
-	result, err := Select(context.Background(), provider, "weather?", candidates())
+	result, err := Select(context.Background(), provider, "weather?", "gpt-5", candidates())
 	if err != nil {
 		t.Fatalf("Select: %v", err)
 	}
@@ -63,7 +66,7 @@ func TestSelect_DropsUnknownIDs(t *testing.T) {
 
 func TestSelect_NoCandidatesShortCircuits(t *testing.T) {
 	provider := &fakeProvider{err: errors.New("should not be called")}
-	result, err := Select(context.Background(), provider, "hi", nil)
+	result, err := Select(context.Background(), provider, "hi", "gpt-5", nil)
 	if err != nil {
 		t.Fatalf("Select: %v", err)
 	}
@@ -74,7 +77,7 @@ func TestSelect_NoCandidatesShortCircuits(t *testing.T) {
 
 func TestSelect_UnparseableResponseFailsClosedToEmpty(t *testing.T) {
 	provider := &fakeProvider{resp: &providers.ChatResponse{Content: "sure, sounds good"}}
-	result, err := Select(context.Background(), provider, "hi", candidates())
+	result, err := Select(context.Background(), provider, "hi", "gpt-5", candidates())
 	if err != nil {
 		t.Fatalf("Select: %v", err)
 	}
@@ -85,7 +88,7 @@ func TestSelect_UnparseableResponseFailsClosedToEmpty(t *testing.T) {
 
 func TestSelect_ProviderErrorIsReturned(t *testing.T) {
 	provider := &fakeProvider{err: errors.New("boom")}
-	if _, err := Select(context.Background(), provider, "hi", candidates()); err == nil {
+	if _, err := Select(context.Background(), provider, "hi", "gpt-5", candidates()); err == nil {
 		t.Fatal("expected an error")
 	}
 }
@@ -94,7 +97,7 @@ func TestSelect_EmptySelectionIsValid(t *testing.T) {
 	provider := &fakeProvider{resp: &providers.ChatResponse{
 		Content: `{"selectedSkillIds":[],"rationale":"just chit-chat, no skill needed"}`,
 	}}
-	result, err := Select(context.Background(), provider, "how are you?", candidates())
+	result, err := Select(context.Background(), provider, "how are you?", "gpt-5", candidates())
 	if err != nil {
 		t.Fatalf("Select: %v", err)
 	}

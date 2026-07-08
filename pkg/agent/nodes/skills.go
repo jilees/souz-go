@@ -25,6 +25,12 @@ type SkillsConfig struct {
 	Registry        *registry.Registry
 	ValidationStore *validation.Store
 	Policy          validation.Policy
+	// Model is the same chat model configured for the agent's normal turns.
+	// Selection and validation both make their own LLM calls independent of
+	// any live turn's AgentSettings, so this is the only way they learn
+	// which model to use — see selection.Select's doc comment for why an
+	// empty Model is not a safe default.
+	Model string
 }
 
 // NewSkills builds the "skills" graph node: it selects which installed
@@ -83,7 +89,7 @@ func activateSkills(ctx context.Context, cfg SkillsConfig, in agent.AgentContext
 		byID[s.SkillID] = s
 	}
 
-	result, err := selection.Select(ctx, cfg.Provider, in.Input, candidates)
+	result, err := selection.Select(ctx, cfg.Provider, in.Input, cfg.Model, candidates)
 	if err != nil {
 		return agent.AgentContext{}, err
 	}
@@ -135,7 +141,7 @@ func ensureApproved(ctx context.Context, cfg SkillsConfig, stored registry.Store
 		if err != nil {
 			return nil, false
 		}
-		fresh := validation.Validate(ctx, cfg.Provider, loaded, cfg.Policy)
+		fresh := validation.Validate(ctx, cfg.Provider, loaded, cfg.Policy, cfg.Model)
 		_ = cfg.ValidationStore.Save(fresh)
 		if !fresh.Approved() {
 			return nil, false

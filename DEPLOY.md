@@ -83,7 +83,10 @@ skills:
   enabled: true
 
 telegram:
-  enabled: false
+  enabled: true
+  token: "<bot-token-from-BotFather>"
+  allowFrom:
+    - "<your-telegram-user-id>"
 ```
 
 Провайдеры:
@@ -177,6 +180,30 @@ adb shell "/data/souz-agent/souz-agent -config /data/souz-agent/config.yaml -cod
 
 ---
 
+## Telegram-канал
+
+`pkg/channels/telegram/` — long-polling бот (напрямую через `net/http`, без SDK), в отличие от `sberboom`-канала полностью реализован и подключается в `wiring.go`/`buildChannels`.
+
+1. Создать бота через [@BotFather](https://t.me/BotFather) → `/newbot`, получить токен вида `123456:AA...`.
+2. **`allowFrom` обязателен для личного использования** — пустой список = бот отвечает всем, кто его найдёт, расходуя API-ключ провайдера. Свой numeric user ID можно узнать у `@userinfobot`, либо (если на устройстве уже стоит picoclaw с настроенным Telegram) вытащить из его конфига:
+   ```bash
+   adb shell "cat /data/picoclaw/config.json" | python3 -c "
+   import json,sys
+   print(json.load(sys.stdin)['channels']['telegram']['allow_from'])
+   "
+   ```
+3. Прописать `token`/`allowFrom` в `config.yaml` (см. пример выше), запушить, `monit restart souz-agent`.
+4. Написать боту в Telegram и проверить, что дошло именно до souz-agent (не до другого процесса на устройстве) — через сессионное хранилище, у Telegram-чатов `chatId` имеет вид `telegram:<userId>`:
+   ```bash
+   adb forward tcp:8080 tcp:8080
+   curl -s http://localhost:8080/v1/chats | python3 -m json.tool
+   curl -s "http://localhost:8080/v1/chats/telegram%3A<userId>/messages" | python3 -m json.tool
+   ```
+
+Токен бота и `config.yaml` целиком — секрет уровня API-ключа: `config.yaml` на диске стоит `0600`, но сам файл никогда не должен попадать в git (см. `.gitignore` → `/build/`).
+
+---
+
 ## Управление сервисом
 
 ```bash
@@ -262,6 +289,6 @@ adb shell "uname -m; cat /proc/version"                     # arch/kernel sanity
 
 ## Известные ограничения текущей версии souz-agent
 
-- **`pkg/channels/sberboom/`** — заглушка (Фаза 2 в `docs/plan.md` не завершена): нет реального WebSocket-клиента к Sber OS bridge, `Start()`/`Send()` ничего не делают. `wiring.go` его вообще не подключает. Голосовой канал колонки как был на picoclaw, так и остаётся — souz-agent пока доступен только по HTTP API.
-- **`/v1/me/settings`, `/v1/me/provider-keys`** — не реализованы, см. выше.
+- **`pkg/channels/sberboom/`** — заглушка (Фаза 2 в `docs/plan.md` не завершена): нет реального WebSocket-клиента к Sber OS bridge, `Start()`/`Send()` ничего не делают. `wiring.go` его вообще не подключает. Голосовой канал колонки как был на picoclaw, так и остаётся — souz-agent сейчас доступен через Telegram-бота и HTTP API, не через голос.
+- **`/v1/me/settings`, `/v1/me/provider-keys`** — не реализованы, см. выше. Смена модели/провайдера/Telegram-токена — только через `config.yaml` + `monit restart`.
 - **Логи не персистятся** при запуске через monit, см. раздел "Логи".

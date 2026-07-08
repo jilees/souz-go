@@ -56,7 +56,7 @@ func (t *RunSkillCommand) Schema() json.RawMessage {
 		"type": "object",
 		"properties": {
 			"skillId": {"type": "string", "description": "Id of an installed, approved skill"},
-			"runtime": {"type": "string", "enum": ["bash", "python", "node", "process"], "description": "How to run this command; defaults to bash"},
+			"runtime": {"type": "string", "enum": ["bash", "python", "node", "process"], "description": "How to run this command; defaults to bash. If bash isn't installed on this system, \"bash\" silently falls back to sh — avoid bash-only syntax (arrays, [[ ]], process substitution) unless bash is known to be present"},
 			"script": {"type": "string", "description": "Inline script source, for runtime bash/python/node"},
 			"command": {"type": "array", "items": {"type": "string"}, "description": "argv, for runtime process"},
 			"workingDirectory": {"type": "string", "description": "Directory to run in, relative to the skill's bundle root; defaults to the root"},

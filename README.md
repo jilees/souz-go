@@ -1,6 +1,6 @@
 # souz-go
 
-Go-порт агентного ядра [souz](https://github.com/D00mch/souz) (Kotlin Multiplatform) для встраиваемых устройств — в первую очередь **SberBoom Home** (Android-based ARM64 Linux, 256 MB RAM, 30 MB свободного места), куда JVM просто не помещается.
+Go-порт агентного ядра [souz](https://github.com/D00mch/souz) (Kotlin Multiplatform) для встраиваемых устройств — Android-based ARM64 Linux со 256 MB RAM и 30 MB свободного места, куда JVM просто не помещается.
 
 Идея простая: тот же граф-движок агента (classify → инструменты → LLM → tool-loop → summarize), что и в оригинале, но без JVM, без Docker-песочницы, без multi-tenant backend — статический Go-бинарник на ~7 MB, который можно залить на встраиваемое устройство и держать там постоянно через `monit`.
 
@@ -19,7 +19,7 @@ Go-порт агентного ядра [souz](https://github.com/D00mch/souz) (
 
 Сознательно **не реализовано** (см. `docs/plan.md`):
 
-- **SberBoom-канал** (`pkg/channels/sberboom/`) и **Mattermost-канал** (`pkg/channels/mattermost/`) — заглушки, `Start()`/`Send()` ничего не делают, в `cmd/souz-agent/wiring.go` даже не подключены. Голосового канала к Sber OS bridge пока нет — агент доступен только по HTTP API и через Telegram.
+- **Вендорский голосовой канал** (`pkg/channels/sberboom/`) и **Mattermost-канал** (`pkg/channels/mattermost/`) — заглушки, `Start()`/`Send()` ничего не делают, в `cmd/souz-agent/wiring.go` даже не подключены. Голосового канала к OS-мосту устройства пока нет — агент доступен только по HTTP API и через Telegram.
 - `/v1/me/settings`, `/v1/me/provider-keys`, `/v1/onboarding/**` и прочие multi-tenant-роуты — однопользовательский embedded-агент настраивается через `config.yaml`, а не через HTTP.
 - GigaChat, voice API, PostgreSQL, Docker-песочница, desktop-инструменты (браузер, календарь, почта, буфер обмена и т.п.) — исключены изначально, не входят в объём порта.
 
@@ -38,7 +38,7 @@ pkg/
   channels/
     channel.go      ← интерфейс Channel + BaseChannel (allow-list)
     telegram/       ← long-polling бот (реализован)
-    sberboom/       ← WebSocket-клиент к Sber OS bridge (заглушка)
+    sberboom/       ← WebSocket-клиент к OS-мосту устройства (заглушка)
     mattermost/     ← WebSocket real-time (заглушка)
   graph/            ← типизированный граф-раннер общего назначения
   agent/
@@ -76,7 +76,7 @@ go run ./cmd/souz-agent
 # Обычная сборка
 go build ./cmd/souz-agent
 
-# Кросс-компиляция под SberBoom (ARM64 Linux, статический бинарник)
+# Кросс-компиляция под целевое устройство (ARM64 Linux, статический бинарник)
 GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -ldflags="-s -w" -o souz-agent-arm64 ./cmd/souz-agent
 
 # Тесты
@@ -157,7 +157,7 @@ souz-agent -codex-login
 
 Плюс любые инструменты с подключённых MCP-серверов (`server.tool` namespace) и скиллы, отобранные LLM-селектором для текущего сообщения.
 
-## Деплой на SberBoom Home
+## Деплой на целевое устройство
 
 Полная инструкция — в [DEPLOY.md](DEPLOY.md): архитектура устройства, сборка, adb, layout `/data/souz-agent/`, monit + init.d, Telegram-бот, быстрый цикл обновления, диагностика.
 

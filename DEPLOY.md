@@ -241,8 +241,9 @@ adb shell "rm /data/souz-agent/state/skill-validations/{skillId}/policies/1/{bun
 ### Ограничения рантайма на SberBoom
 
 На устройстве **нет `bash`** (только BusyBox `sh`) и **нет `curl`** в `PATH` агента (только `wget` от BusyBox). Для `RunSkillCommand`:
-- `runtime: "bash"` **не будет работать** — упадёт с `"bash" is not available on this system`.
-- Используйте `runtime: "process"` с прямым `argv` (например `["wget","-q","-O","-","--header","Content-Type: application/json","--post-data","{...}","http://..."]`) — без обёртки в `sh -c` это ещё и избавляет от проблем с экранированием кавычек в JSON, который LLM подставляет в команду.
+- `runtime: "bash"` теперь **автоматически падает на `sh`**, если `bash` не найден в `PATH` (`pkg/tools/skills/exec.go`, `bashBinary()` — тот же паттерн, что уже был у `pythonBinary()` для `python3`/`python`). На SberBoom это значит: скрипт реально исполнится через BusyBox `sh`, а не свалится с `"bash" is not available on this system"`.
+- **Но** bash-специфичный синтаксис (массивы, `[[ ]]`, process substitution `<(...)`, `local`-only фичи и т.п.) под `sh` не заработает — фолбэк не эмулирует bash, только не даёт упасть на старте. Пишите скрипты в POSIX sh, если runtime может исполняться на embedded-таргете.
+- Для простых HTTP-вызовов (как в tv-control) проще и надёжнее `runtime: "process"` с прямым `argv` (например `["wget","-q","-O","-","--header","Content-Type: application/json","--post-data","{...}","http://..."]`) — без шелла вообще, что заодно снимает проблему экранирования кавычек в JSON, который LLM подставляет в команду.
 
 ---
 

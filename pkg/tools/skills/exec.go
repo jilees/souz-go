@@ -40,7 +40,7 @@ type runSpec struct {
 func buildRunSpec(rt runtime, script string, command []string, dir string) (runSpec, error) {
 	switch rt {
 	case runtimeBash, "":
-		return scriptRunSpec("bash", ".sh", script, dir)
+		return scriptRunSpec(bashBinary(), ".sh", script, dir)
 	case runtimePython:
 		return scriptRunSpec(pythonBinary(), ".py", script, dir)
 	case runtimeNode:
@@ -60,6 +60,21 @@ func pythonBinary() string {
 		return "python3"
 	}
 	return "python"
+}
+
+// bashBinary falls back to sh when bash isn't installed — true of BusyBox
+// embedded targets like SberBoom Home, which ship only /bin/sh (ash), no
+// bash. Scripts relying on bash-only syntax (arrays, [[ ]], process
+// substitution, ...) will fail under sh; that's a real behavior difference
+// skill authors need to write around on such targets, not something this
+// fallback can paper over — it only saves runtime "bash" from failing
+// outright with "bash is not available on this system" everywhere sh would
+// have worked fine.
+func bashBinary() string {
+	if _, err := exec.LookPath("bash"); err == nil {
+		return "bash"
+	}
+	return "sh"
 }
 
 func scriptRunSpec(interpreter, ext, script, dir string) (runSpec, error) {

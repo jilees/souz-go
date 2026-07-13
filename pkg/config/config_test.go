@@ -18,6 +18,32 @@ func TestLoad_MissingFileReturnsDefaults(t *testing.T) {
 	}
 }
 
+func TestLoad_MissingFileUsesDefaultSystemPrompt(t *testing.T) {
+	cfg, err := Load(filepath.Join(t.TempDir(), "does-not-exist.yaml"))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.SystemPrompt != defaultSystemPrompt {
+		t.Errorf("expected default system prompt, got %q", cfg.SystemPrompt)
+	}
+}
+
+func TestLoad_ExplicitSystemPromptOverridesDefault(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	yaml := `systemPrompt: "Обращайся ко мне на ты."`
+	if err := os.WriteFile(path, []byte(yaml), 0o600); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.SystemPrompt != "Обращайся ко мне на ты." {
+		t.Errorf("expected explicit systemPrompt to override default, got %q", cfg.SystemPrompt)
+	}
+}
+
 func TestLoad_OverridesDefaults(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.yaml")
 	yaml := `

@@ -129,17 +129,37 @@ type Config struct {
 	Skills SkillsSettings    `yaml:"skills"`
 }
 
+// defaultSystemPrompt is the fallback used when config.yaml sets no
+// systemPrompt. Ported from the Kotlin original's SystemPromptResolver
+// (agent/src/main/kotlin/ru/souz/agent/SystemPromptResolver.kt) — souz-go
+// takes the tool-use rules variant rather than the KMP backend's generic
+// "answer directly" line, since souz-go's graph always runs a tool loop.
+const defaultSystemPrompt = `## Правила работы:
+1. **Приоритет инструментов:** Если задачу можно решить вызовом функции — ВЫЗЫВАЙ ЕЁ. Никогда не пиши название функции текстом и не присылай примеры кода на Python/Bash, если ты не собираешься их исполнять через инструмент.
+2. **Рассуждения (Chain of Thought):** Перед действием кратко проанализируй запрос. Сначала подумай, какой инструмент нужен, затем используй его.
+3. **Формат ответа:**
+   - Если результат получен: кратко сообщи об успехе.
+   - Если ошибка: сообщи суть проблемы и предложи решение.
+4. **Работа с файлами:** Будь краток. Не выводи содержимое файлов, если тебя об этом прямо не просили.
+5. **Возврат текста:**
+   - Если нужно вернуть текст - возвращай в формате Markdown.
+   - В Markdown не возвращай таблицы - вместо них возвращай форматированные списки.
+
+## Критически важно:
+Твоя задача — ДЕЙСТВОВАТЬ, а не болтать.`
+
 // Default returns a Config with sane defaults for an empty/missing config.yaml.
 func Default() *Config {
 	return &Config{
-		DataDir:     defaultDataDir(),
-		Provider:    "anthropic",
-		Temperature: 0.7,
-		ContextSize: 16_000,
-		MaxTokens:   4_096,
-		Tools:       ToolsConfig{WebEnabled: true},
-		HTTP:        HTTPConfig{Enabled: true, Addr: ":8080"},
-		Skills:      SkillsSettings{Enabled: true},
+		DataDir:      defaultDataDir(),
+		Provider:     "anthropic",
+		Temperature:  0.7,
+		ContextSize:  16_000,
+		MaxTokens:    4_096,
+		SystemPrompt: defaultSystemPrompt,
+		Tools:        ToolsConfig{WebEnabled: true},
+		HTTP:         HTTPConfig{Enabled: true, Addr: ":8080"},
+		Skills:       SkillsSettings{Enabled: true},
 	}
 }
 

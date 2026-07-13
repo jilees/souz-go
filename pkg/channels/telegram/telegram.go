@@ -22,9 +22,22 @@ const (
 	longPollTimeoutSeconds = 30
 	httpClientTimeout      = 40 * time.Second
 	pollErrorBackoff       = 2 * time.Second
+
+	// maxTypingDuration caps how long the indicator can run if stop is
+	// never called (e.g. the LLM call hangs), so a stuck turn doesn't
+	// leave the user staring at "typing…" forever.
+	maxTypingDuration = 5 * time.Minute
 )
 
-var _ channels.Channel = (*Channel)(nil)
+// typingRepeatInterval must be shorter than Telegram's ~5s typing indicator
+// expiry so the "печатает…" status stays up continuously while the agent is
+// still thinking. A var (not const) so tests can shorten it.
+var typingRepeatInterval = 4 * time.Second
+
+var (
+	_ channels.Channel       = (*Channel)(nil)
+	_ channels.TypingCapable = (*Channel)(nil)
+)
 
 // Config holds Telegram channel configuration.
 type Config struct {
@@ -119,6 +132,42 @@ func (c *Channel) Send(ctx context.Context, msg bus.OutboundMessage) error {
 		values.Set("reply_to_message_id", msg.ReplyToMessageID)
 	}
 	_, err := call[json.RawMessage](ctx, c.httpClient(), c.apiURL("sendMessage"), values)
+	return err
+}
+
+// StartTyping implements channels.TypingCapable. It sends the "typing" chat
+// action immediately and repeats it every typingRepeatInterval — shorter
+// than Telegram's own expiry — until the returned stop func is called, the
+// context is cancelled, or maxTypingDuration elapses. The stop func is
+// idempotent.
+func (c *Channel) StartTyping(ctx context.Context, chatID string) (func(), error) {
+	if err := c.sendChatAction(ctx, chatID); err != nil {
+		return func() {}, err
+	}
+
+	typingCtx, cancel := context.WithTimeout(ctx, maxTypingDuration)
+	go func() {
+		defer cancel()
+		ticker := time.NewTicker(typingRepeatInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-typingCtx.Done():
+				return
+			case <-ticker.C:
+				_ = c.sendChatAction(typingCtx, chatID)
+			}
+		}
+	}()
+
+	return cancel, nil
+}
+
+func (c *Channel) sendChatAction(ctx context.Context, chatID string) error {
+	values := url.Values{}
+	values.Set("chat_id", chatID)
+	values.Set("action", "typing")
+	_, err := call[json.RawMessage](ctx, c.httpClient(), c.apiURL("sendChatAction"), values)
 	return err
 }
 

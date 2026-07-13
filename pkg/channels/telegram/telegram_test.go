@@ -131,3 +131,63 @@ func TestChannel_StartRequiresToken(t *testing.T) {
 		t.Fatal("expected error for missing token")
 	}
 }
+
+func TestChannel_StartTypingSendsActionImmediatelyAndRepeats(t *testing.T) {
+	old := typingRepeatInterval
+	typingRepeatInterval = 20 * time.Millisecond
+	defer func() { typingRepeatInterval = old }()
+
+	var calls atomic.Int64
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/bot"+testToken+"/sendChatAction" {
+			t.Errorf("unexpected path: %s", r.URL.Path)
+		}
+		if err := r.ParseForm(); err != nil {
+			t.Fatalf("ParseForm: %v", err)
+		}
+		if r.PostForm.Get("chat_id") != "100" || r.PostForm.Get("action") != "typing" {
+			t.Errorf("unexpected form values: %v", r.PostForm)
+		}
+		calls.Add(1)
+		fmt.Fprint(w, `{"ok":true,"result":true}`)
+	}))
+	defer server.Close()
+
+	ch := New(Config{Token: testToken, BaseURL: server.URL}, bus.New())
+	stop, err := ch.StartTyping(context.Background(), "100")
+	if err != nil {
+		t.Fatalf("StartTyping: %v", err)
+	}
+	if calls.Load() != 1 {
+		t.Fatalf("expected immediate action, got %d calls", calls.Load())
+	}
+
+	time.Sleep(100 * time.Millisecond)
+	stop()
+	stop() // must be idempotent
+
+	// Let any tick that was already in flight when stop() fired land,
+	// so the next snapshot isn't racing an in-progress HTTP round trip.
+	time.Sleep(100 * time.Millisecond)
+	afterStop := calls.Load()
+	if afterStop < 2 {
+		t.Fatalf("expected repeated actions before stop, got %d calls", afterStop)
+	}
+
+	time.Sleep(100 * time.Millisecond)
+	if calls.Load() != afterStop {
+		t.Errorf("expected no further actions after stop, got %d calls (was %d)", calls.Load(), afterStop)
+	}
+}
+
+func TestChannel_StartTypingReturnsErrorOnAPIFailure(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `{"ok":false,"description":"chat not found"}`)
+	}))
+	defer server.Close()
+
+	ch := New(Config{Token: testToken, BaseURL: server.URL}, bus.New())
+	if _, err := ch.StartTyping(context.Background(), "bad"); err == nil {
+		t.Fatal("expected error")
+	}
+}

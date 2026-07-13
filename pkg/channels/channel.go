@@ -20,6 +20,15 @@ type Channel interface {
 	IsRunning() bool
 }
 
+// TypingCapable is implemented by channels that can show a "typing"/"thinking"
+// indicator to the user while the agent is processing a turn. StartTyping
+// begins the indicator and returns a stop function; the stop function must
+// be idempotent and safe to call multiple times (including never, if
+// StartTyping itself failed).
+type TypingCapable interface {
+	StartTyping(ctx context.Context, chatID string) (stop func(), err error)
+}
+
 // BaseChannel provides the common allow-list check and bus-publish logic
 // that every concrete channel embeds.
 type BaseChannel struct {

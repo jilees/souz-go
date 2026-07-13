@@ -123,7 +123,7 @@ func run(ctx context.Context, cfg *config.Config) error {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		runInboundLoop(ctx, messageBus, executor, sessionStore, settings, cfg.SystemPrompt)
+		runInboundLoop(ctx, messageBus, executor, sessionStore, settings, cfg.SystemPrompt, channelRegistry)
 	}()
 
 	wg.Add(1)
@@ -164,7 +164,7 @@ func run(ctx context.Context, cfg *config.Config) error {
 // sequentially — a single embedded agent doesn't need concurrent turns
 // across chats, and running them one at a time avoids racing on
 // storage.ChatState for the same chat.
-func runInboundLoop(ctx context.Context, mb *bus.MessageBus, executor *agent.Executor, store *storage.Store, settings agent.AgentSettings, systemPrompt string) {
+func runInboundLoop(ctx context.Context, mb *bus.MessageBus, executor *agent.Executor, store *storage.Store, settings agent.AgentSettings, systemPrompt string, channelRegistry map[string]channels.Channel) {
 	for {
 		select {
 		case <-ctx.Done():
@@ -173,13 +173,23 @@ func runInboundLoop(ctx context.Context, mb *bus.MessageBus, executor *agent.Exe
 			if !ok {
 				return
 			}
-			handleInbound(ctx, mb, executor, store, settings, systemPrompt, msg)
+			handleInbound(ctx, mb, executor, store, settings, systemPrompt, channelRegistry, msg)
 		}
 	}
 }
 
-func handleInbound(ctx context.Context, mb *bus.MessageBus, executor *agent.Executor, store *storage.Store, settings agent.AgentSettings, systemPrompt string, msg bus.InboundMessage) {
+func handleInbound(ctx context.Context, mb *bus.MessageBus, executor *agent.Executor, store *storage.Store, settings agent.AgentSettings, systemPrompt string, channelRegistry map[string]channels.Channel, msg bus.InboundMessage) {
 	chatID := msg.Channel + ":" + msg.ChatID
+
+	if ch, found := channelRegistry[msg.Channel]; found {
+		if tc, ok := ch.(channels.TypingCapable); ok {
+			if stop, err := tc.StartTyping(ctx, msg.ChatID); err != nil {
+				slog.Warn("failed to start typing indicator", "chat", chatID, "error", err)
+			} else {
+				defer stop()
+			}
+		}
+	}
 
 	cs, err := store.Get(chatID)
 	if err != nil {

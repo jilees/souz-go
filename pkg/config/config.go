@@ -71,6 +71,15 @@ type TelegramConfig struct {
 	AllowFrom []string     `yaml:"allowFrom,omitempty"`
 }
 
+// HooksConfig configures external scripts run around every agent turn
+// (e.g. to blink an LED, play a sound, or log activity on-device). An
+// empty path disables that half; both are empty by default so souz-go
+// behaves identically on any deployment that doesn't set them.
+type HooksConfig struct {
+	TurnStartScript string `yaml:"turnStartScript,omitempty"`
+	TurnEndScript   string `yaml:"turnEndScript,omitempty"`
+}
+
 // ToolsConfig configures the built-in local tools.
 type ToolsConfig struct {
 	// FilesRoot sandboxes the files tool; empty disables it (no tool is
@@ -121,6 +130,8 @@ type Config struct {
 	OpenAICompat ProviderConfig `yaml:"openaiCompat"`
 
 	Telegram TelegramConfig `yaml:"telegram"`
+
+	Hooks HooksConfig `yaml:"hooks"`
 
 	Tools ToolsConfig `yaml:"tools"`
 	HTTP  HTTPConfig  `yaml:"http"`

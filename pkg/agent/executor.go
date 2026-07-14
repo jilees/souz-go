@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"souz.ru/souz-go/pkg/graph"
+	"souz.ru/souz-go/pkg/hooks"
 	"souz.ru/souz-go/pkg/providers"
 )
 
@@ -25,22 +26,32 @@ type Executor struct {
 	start     *graph.Node
 	policy    graph.RetryPolicy
 	stepLimit int
+	turnHooks *hooks.Hooks
 }
 
 // NewExecutor builds an Executor that runs def starting at start.
-// stepLimit <= 0 defaults to 64 (see graph.Runner.Run).
-func NewExecutor(def *graph.Definition, start *graph.Node, policy graph.RetryPolicy, stepLimit int) *Executor {
+// stepLimit <= 0 defaults to 64 (see graph.Runner.Run). turnHooks may be
+// nil, which disables it — Execute runs every turn the same way either
+// way, this is the single choke point every caller (channels, HTTP API,
+// ...) goes through, so wiring turnHooks here covers all of them.
+func NewExecutor(def *graph.Definition, start *graph.Node, policy graph.RetryPolicy, stepLimit int, turnHooks *hooks.Hooks) *Executor {
 	return &Executor{
 		runner:    &graph.Runner{},
 		def:       def,
 		start:     start,
 		policy:    policy,
 		stepLimit: stepLimit,
+		turnHooks: turnHooks,
 	}
 }
 
 // Execute runs the agent graph for a single user turn.
 func (e *Executor) Execute(ctx context.Context, seed AgentContext) (*TurnResult, error) {
+	if e.turnHooks != nil {
+		end := e.turnHooks.StartTurn()
+		defer end()
+	}
+
 	out, err := e.runner.Run(ctx, e.start, seed, e.def, e.stepLimit, e.policy, nil)
 	if err != nil {
 		return nil, fmt.Errorf("agent turn: %w", err)

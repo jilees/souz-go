@@ -22,6 +22,7 @@ import (
 	"souz.ru/souz-go/pkg/channels"
 	"souz.ru/souz-go/pkg/config"
 	"souz.ru/souz-go/pkg/graph"
+	"souz.ru/souz-go/pkg/hooks"
 	souzhttp "souz.ru/souz-go/pkg/http"
 	"souz.ru/souz-go/pkg/providers/codex"
 	"souz.ru/souz-go/pkg/skills/bundle"
@@ -92,8 +93,13 @@ func run(ctx context.Context, cfg *config.Config) error {
 		}
 	}
 
+	turnHooks := hooks.New(hooks.Config{
+		TurnStartScript: cfg.Hooks.TurnStartScript,
+		TurnEndScript:   cfg.Hooks.TurnEndScript,
+	})
+
 	def, start := nodes.BuildGraph(provider, toolRegistry, mcpClients, skillsCfg)
-	executor := agent.NewExecutor(def, start, graph.RetryPolicy{}, 64)
+	executor := agent.NewExecutor(def, start, graph.RetryPolicy{}, 64, turnHooks)
 
 	settings := agent.AgentSettings{
 		Model:       cfg.Model,

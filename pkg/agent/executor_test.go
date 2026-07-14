@@ -14,7 +14,7 @@ func TestExecutor_ReturnsLastAssistantText(t *testing.T) {
 		return in.WithHistory(providers.Message{Role: providers.RoleAssistant, Content: "final answer"}), nil
 	})
 	def := graph.NewDefinition()
-	exec := NewExecutor(def, appendMsg, graph.RetryPolicy{}, 0)
+	exec := NewExecutor(def, appendMsg, graph.RetryPolicy{}, 0, nil)
 
 	result, err := exec.Execute(context.Background(), AgentContext{})
 	if err != nil {
@@ -30,7 +30,7 @@ func TestExecutor_PropagatesNodeError(t *testing.T) {
 		return in, errors.New("boom")
 	})
 	def := graph.NewDefinition()
-	exec := NewExecutor(def, failing, graph.RetryPolicy{}, 0)
+	exec := NewExecutor(def, failing, graph.RetryPolicy{}, 0, nil)
 
 	if _, err := exec.Execute(context.Background(), AgentContext{}); err == nil {
 		t.Fatal("expected error")

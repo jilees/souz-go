@@ -27,7 +27,7 @@ func echoExecutor() *agent.Executor {
 		}
 		return in.WithHistory(providers.Message{Role: providers.RoleAssistant, Content: reply}), nil
 	})
-	return agent.NewExecutor(graph.NewDefinition(), echo, graph.RetryPolicy{}, 10)
+	return agent.NewExecutor(graph.NewDefinition(), echo, graph.RetryPolicy{}, 10, nil)
 }
 
 // blockingExecutor builds an Executor whose node blocks until ctx is
@@ -41,7 +41,7 @@ func blockingExecutor(timeout time.Duration) *agent.Executor {
 			return in, nil
 		}
 	})
-	return agent.NewExecutor(graph.NewDefinition(), blocker, graph.RetryPolicy{}, 10)
+	return agent.NewExecutor(graph.NewDefinition(), blocker, graph.RetryPolicy{}, 10, nil)
 }
 
 func newTestServer(t *testing.T, executor *agent.Executor) (*httptest.Server, *storage.Store) {

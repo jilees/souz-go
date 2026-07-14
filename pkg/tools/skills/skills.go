@@ -52,8 +52,11 @@ func New(reg *registry.Registry, store *validation.Store, policyVersion int) *Ru
 func (t *RunSkillCommand) Name() string { return "RunSkillCommand" }
 
 func (t *RunSkillCommand) Description() string {
-	return "Runs a script or command from an installed skill's bundle, in a subprocess confined to that " +
-		"skill's directory. Only skills that passed validation can be run."
+	return "Runs a script or command for one of the skills active this turn, in a subprocess confined to that " +
+		"skill's directory. Use only for files or instructions from active skills, and only when a skill " +
+		"explicitly needs command execution. Do not use this tool just to list, inspect, or browse skill bundle " +
+		"files. Do not call it for instruction-only/template-only skills that can be followed directly from the " +
+		"system prompt."
 }
 
 func (t *RunSkillCommand) Schema() json.RawMessage {

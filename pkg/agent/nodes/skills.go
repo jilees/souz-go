@@ -17,6 +17,11 @@ import (
 const (
 	skillsContextStart = "<souz_skills_context>"
 	skillsContextEnd   = "</souz_skills_context>"
+
+	// runSkillCommandToolName must match skills.RunSkillCommand.Name() —
+	// duplicated here rather than imported to avoid pkg/agent/nodes depending
+	// on pkg/tools/skills for a single string constant.
+	runSkillCommandToolName = "RunSkillCommand"
 )
 
 // SkillsConfig wires the skills subsystem into the "skills" graph node.
@@ -37,19 +42,26 @@ type SkillsConfig struct {
 // skills (if any) are relevant to this turn's input, ensures each selected
 // skill has a current APPROVED validation record (re-validating a STALE or
 // missing one), injects the approved skills' instructions into
-// ctx.SystemPrompt, and records their ids in
-// ctx.InvocationMeta.ActiveSkillIDs. Execution of a skill's scripts happens
-// later, via the RunSkillCommand tool, which checks a call's skillId against
-// ActiveSkillIDs — this node is what decides both which skills' instructions
-// the model gets to see *and* which skillIds RunSkillCommand will accept
-// this turn.
+// ctx.SystemPrompt, records their ids in ctx.InvocationMeta.ActiveSkillIDs,
+// and rewrites the RunSkillCommand tool definition in ctx.ActiveTools to
+// match — dropping it entirely when nothing is active this turn, or
+// appending the list of active skill ids to its description when something
+// is. Execution of a skill's scripts happens later, via the RunSkillCommand
+// tool, which checks a call's skillId against ActiveSkillIDs — this node is
+// what decides which skills' instructions the model gets to see, whether it
+// even sees RunSkillCommand as callable, and which skillIds it will accept
+// this turn. Ported from the KMP original's per-turn tool-description
+// rewrite (NodesSkills.kt's withSkillTools) so the model learns what's
+// actually usable *before* deciding to call the tool, not just after.
 //
 // It fails open on the system-prompt enrichment (any error — registry
 // unreadable, selection/validation LLM call failing — leaves the turn
 // unaffected, aside from clearing out any stale skills-context block from a
-// previous turn) but always fails closed on ActiveSkillIDs: any error path
-// here leaves it empty, so a turn where skill selection couldn't run grants
-// no RunSkillCommand access rather than silently keeping a prior grant.
+// previous turn) but always fails closed on ActiveSkillIDs and tool
+// visibility: any error path here leaves ActiveSkillIDs empty and
+// RunSkillCommand out of ActiveTools, so a turn where skill selection
+// couldn't run grants no RunSkillCommand access rather than silently
+// keeping a prior grant.
 func NewSkills(cfg SkillsConfig) *graph.Node {
 	return graph.NewNode("skills", func(ctx context.Context, in agent.AgentContext) (agent.AgentContext, error) {
 		out, err := activateSkills(ctx, cfg, in)
@@ -57,6 +69,7 @@ func NewSkills(cfg SkillsConfig) *graph.Node {
 			out = in
 			out.SystemPrompt = stripSkillsContext(in.SystemPrompt)
 			out.InvocationMeta.ActiveSkillIDs = nil
+			out.ActiveTools = withoutRunSkillCommand(in.ActiveTools)
 		}
 		return out, nil
 	})
@@ -135,6 +148,7 @@ func activateSkills(ctx context.Context, cfg SkillsConfig, in agent.AgentContext
 	out := in
 	out.SystemPrompt = appendSkillsContext(stripSkillsContext(in.SystemPrompt), activated)
 	out.InvocationMeta.ActiveSkillIDs = activeIDs
+	out.ActiveTools = withActiveSkillsDescription(in.ActiveTools, activated)
 	return out, nil
 }
 
@@ -175,12 +189,55 @@ func ensureApproved(ctx context.Context, cfg SkillsConfig, stored registry.Store
 
 func withoutSkillsContext(in agent.AgentContext) agent.AgentContext {
 	stripped := stripSkillsContext(in.SystemPrompt)
-	if stripped == in.SystemPrompt && in.InvocationMeta.ActiveSkillIDs == nil {
+	strippedTools := withoutRunSkillCommand(in.ActiveTools)
+	if stripped == in.SystemPrompt && in.InvocationMeta.ActiveSkillIDs == nil && len(strippedTools) == len(in.ActiveTools) {
 		return in
 	}
 	out := in
 	out.SystemPrompt = stripped
 	out.InvocationMeta.ActiveSkillIDs = nil
+	out.ActiveTools = strippedTools
+	return out
+}
+
+// withoutRunSkillCommand drops the RunSkillCommand definition from tools
+// entirely — matching KMP's withDynamicSkillTools when no skill is
+// activated — rather than leaving it visible with nothing it's authorized
+// to run. A model that never sees the tool can't attempt (and fail) a call.
+func withoutRunSkillCommand(toolsIn []providers.ToolDefinition) []providers.ToolDefinition {
+	out := make([]providers.ToolDefinition, 0, len(toolsIn))
+	for _, t := range toolsIn {
+		if t.Name == runSkillCommandToolName {
+			continue
+		}
+		out = append(out, t)
+	}
+	return out
+}
+
+// withActiveSkillsDescription rewrites RunSkillCommand's Description (if
+// present in toolsIn) to append this turn's activated skill ids, mirroring
+// KMP's NodesSkills.kt buildSkillCommandDescription — the model reads which
+// skillIds are actually callable as part of deciding whether to call the
+// tool at all, rather than learning it only from a runtime rejection.
+func withActiveSkillsDescription(toolsIn []providers.ToolDefinition, activated []activatedSkill) []providers.ToolDefinition {
+	out := make([]providers.ToolDefinition, len(toolsIn))
+	copy(out, toolsIn)
+	for i, t := range out {
+		if t.Name != runSkillCommandToolName {
+			continue
+		}
+		var b strings.Builder
+		b.WriteString(t.Description)
+		b.WriteString("\n\nActive Skills for this turn:\n")
+		for _, s := range activated {
+			fmt.Fprintf(&b, "- %s\n", s.SkillID)
+		}
+		b.WriteString("Do not use this tool merely to list or inspect the skill bundle files. ")
+		b.WriteString("Call it only when an active skill instruction requires executing a bundled script or command. ")
+		b.WriteString("For instruction-only/template-only skills, follow the injected skill instructions without calling this tool.")
+		out[i].Description = b.String()
+	}
 	return out
 }
 

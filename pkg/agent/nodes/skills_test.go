@@ -2,6 +2,7 @@ package nodes
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -11,6 +12,25 @@ import (
 	"souz.ru/souz-go/pkg/skills/registry"
 	"souz.ru/souz-go/pkg/skills/validation"
 )
+
+// fakeActiveTools seeds a RunSkillCommand definition alongside an unrelated
+// tool, so tests can assert the skills node rewrites/removes the former
+// without disturbing the latter.
+func fakeActiveTools() []providers.ToolDefinition {
+	return []providers.ToolDefinition{
+		{Name: "WebSearch", Description: "search the web"},
+		{Name: runSkillCommandToolName, Description: "base description"},
+	}
+}
+
+func findTool(tools []providers.ToolDefinition, name string) (providers.ToolDefinition, bool) {
+	for _, t := range tools {
+		if t.Name == name {
+			return t, true
+		}
+	}
+	return providers.ToolDefinition{}, false
+}
 
 func newSkillsTestConfig(t *testing.T, selectResp string) (SkillsConfig, *registry.Registry) {
 	t.Helper()
@@ -74,7 +94,7 @@ func TestSkills_SelectedApprovedSkillInjectsContext(t *testing.T) {
 	}
 
 	node := NewSkills(cfg)
-	in := agent.AgentContext{Input: "what's the weather", SystemPrompt: "base prompt"}
+	in := agent.AgentContext{Input: "what's the weather", SystemPrompt: "base prompt", ActiveTools: fakeActiveTools()}
 	out, err := node.Execute(context.Background(), in)
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
@@ -93,6 +113,17 @@ func TestSkills_SelectedApprovedSkillInjectsContext(t *testing.T) {
 	if len(got.InvocationMeta.ActiveSkillIDs) != 1 || got.InvocationMeta.ActiveSkillIDs[0] != stored.SkillID {
 		t.Errorf("ActiveSkillIDs = %v, want [%s]", got.InvocationMeta.ActiveSkillIDs, stored.SkillID)
 	}
+
+	runSkill, ok := findTool(got.ActiveTools, runSkillCommandToolName)
+	if !ok {
+		t.Fatal("expected RunSkillCommand to remain in ActiveTools")
+	}
+	if !strings.Contains(runSkill.Description, "Active Skills for this turn") || !strings.Contains(runSkill.Description, stored.SkillID) {
+		t.Errorf("expected RunSkillCommand description to list active skill ids, got %q", runSkill.Description)
+	}
+	if _, ok := findTool(got.ActiveTools, "WebSearch"); !ok {
+		t.Error("expected unrelated tools left untouched in ActiveTools")
+	}
 }
 
 func TestSkills_UnapprovedSkillIsNotInjected(t *testing.T) {
@@ -101,7 +132,7 @@ func TestSkills_UnapprovedSkillIsNotInjected(t *testing.T) {
 	// No validation record saved: GetSkill exists, but nothing APPROVED.
 
 	node := NewSkills(cfg)
-	in := agent.AgentContext{Input: "what's the weather", SystemPrompt: "base prompt"}
+	in := agent.AgentContext{Input: "what's the weather", SystemPrompt: "base prompt", ActiveTools: fakeActiveTools()}
 	out, err := node.Execute(context.Background(), in)
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
@@ -112,6 +143,12 @@ func TestSkills_UnapprovedSkillIsNotInjected(t *testing.T) {
 	}
 	if len(got.InvocationMeta.ActiveSkillIDs) != 0 {
 		t.Errorf("expected no ActiveSkillIDs for an unapproved skill, got %v", got.InvocationMeta.ActiveSkillIDs)
+	}
+	if _, ok := findTool(got.ActiveTools, runSkillCommandToolName); ok {
+		t.Error("expected RunSkillCommand removed from ActiveTools when nothing is approved")
+	}
+	if _, ok := findTool(got.ActiveTools, "WebSearch"); !ok {
+		t.Error("expected unrelated tools left untouched in ActiveTools")
 	}
 }
 
@@ -134,7 +171,7 @@ func TestSkills_StaleRecordTriggersRevalidation(t *testing.T) {
 	cfg.Provider = seq
 
 	node := NewSkills(cfg)
-	in := agent.AgentContext{Input: "what's the weather"}
+	in := agent.AgentContext{Input: "what's the weather", ActiveTools: fakeActiveTools()}
 	out, err := node.Execute(context.Background(), in)
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
@@ -151,6 +188,9 @@ func TestSkills_StaleRecordTriggersRevalidation(t *testing.T) {
 	if len(got.InvocationMeta.ActiveSkillIDs) != 1 || got.InvocationMeta.ActiveSkillIDs[0] != stored.SkillID {
 		t.Errorf("ActiveSkillIDs = %v, want [%s]", got.InvocationMeta.ActiveSkillIDs, stored.SkillID)
 	}
+	if runSkill, ok := findTool(got.ActiveTools, runSkillCommandToolName); !ok || !strings.Contains(runSkill.Description, stored.SkillID) {
+		t.Errorf("expected RunSkillCommand description to list %q, got %+v", stored.SkillID, runSkill)
+	}
 }
 
 func TestSkills_NoSelectionStripsStaleContext(t *testing.T) {
@@ -163,6 +203,7 @@ func TestSkills_NoSelectionStripsStaleContext(t *testing.T) {
 		Input:          "how are you?",
 		SystemPrompt:   staleSystemPrompt,
 		InvocationMeta: agent.InvocationMeta{ActiveSkillIDs: []string{"weather-lookup"}},
+		ActiveTools:    fakeActiveTools(),
 	}
 	out, err := node.Execute(context.Background(), in)
 	if err != nil {
@@ -177,6 +218,37 @@ func TestSkills_NoSelectionStripsStaleContext(t *testing.T) {
 	}
 	if len(got.InvocationMeta.ActiveSkillIDs) != 0 {
 		t.Errorf("expected stale ActiveSkillIDs cleared, got %v", got.InvocationMeta.ActiveSkillIDs)
+	}
+	if _, ok := findTool(got.ActiveTools, runSkillCommandToolName); ok {
+		t.Error("expected RunSkillCommand removed from ActiveTools when nothing is selected")
+	}
+}
+
+func TestSkills_ErrorPathHidesRunSkillCommand(t *testing.T) {
+	cfg, reg := newSkillsTestConfig(t, "")
+	installSkill(t, reg, "Weather Lookup", "Looks up weather", "Use the weather API.")
+	cfg.Provider = &fakeProvider{err: errors.New("provider unavailable")}
+
+	node := NewSkills(cfg)
+	in := agent.AgentContext{
+		Input:          "what's the weather",
+		SystemPrompt:   "base prompt",
+		InvocationMeta: agent.InvocationMeta{ActiveSkillIDs: []string{"weather-lookup"}},
+		ActiveTools:    fakeActiveTools(),
+	}
+	out, err := node.Execute(context.Background(), in)
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	got := out.(agent.AgentContext)
+	if len(got.InvocationMeta.ActiveSkillIDs) != 0 {
+		t.Errorf("expected ActiveSkillIDs cleared on error, got %v", got.InvocationMeta.ActiveSkillIDs)
+	}
+	if _, ok := findTool(got.ActiveTools, runSkillCommandToolName); ok {
+		t.Error("expected RunSkillCommand removed from ActiveTools when selection errors")
+	}
+	if _, ok := findTool(got.ActiveTools, "WebSearch"); !ok {
+		t.Error("expected unrelated tools left untouched in ActiveTools")
 	}
 }
 

@@ -107,8 +107,31 @@ func TestChannel_SendPostsExpectedForm(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Send: %v", err)
 	}
-	if gotValues.Get("chat_id") != "100" || gotValues.Get("text") != "hi there" || gotValues.Get("reply_to_message_id") != "10" {
+	if gotValues.Get("chat_id") != "100" || gotValues.Get("text") != "hi there" || gotValues.Get("reply_to_message_id") != "10" || gotValues.Get("parse_mode") != "HTML" {
 		t.Errorf("unexpected form values: %v", gotValues)
+	}
+}
+
+func TestChannel_SendConvertsMarkdownToHTML(t *testing.T) {
+	var gotValues url.Values
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := r.ParseForm(); err != nil {
+			t.Fatalf("ParseForm: %v", err)
+		}
+		gotValues = r.PostForm
+		fmt.Fprint(w, `{"ok":true,"result":{}}`)
+	}))
+	defer server.Close()
+
+	ch := New(Config{Token: testToken, BaseURL: server.URL}, bus.New())
+	text := "Team **A** vs Team **B**, use `go test`, see [docs](https://example.com?a=1&b=2) & enjoy < >"
+	err := ch.Send(context.Background(), bus.OutboundMessage{ChatID: "100", Text: text})
+	if err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+	want := `Team <b>A</b> vs Team <b>B</b>, use <code>go test</code>, see <a href="https://example.com?a=1&amp;b=2">docs</a> &amp; enjoy &lt; &gt;`
+	if gotValues.Get("text") != want {
+		t.Errorf("unexpected converted text:\ngot:  %s\nwant: %s", gotValues.Get("text"), want)
 	}
 }
 

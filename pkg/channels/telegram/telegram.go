@@ -127,7 +127,8 @@ func (c *Channel) Start(ctx context.Context) error {
 func (c *Channel) Send(ctx context.Context, msg bus.OutboundMessage) error {
 	values := url.Values{}
 	values.Set("chat_id", msg.ChatID)
-	values.Set("text", msg.Text)
+	values.Set("text", mdToHTML(msg.Text))
+	values.Set("parse_mode", "HTML")
 	if msg.ReplyToMessageID != "" {
 		values.Set("reply_to_message_id", msg.ReplyToMessageID)
 	}

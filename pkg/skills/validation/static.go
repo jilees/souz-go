@@ -14,36 +14,40 @@ type staticRule struct {
 // staticRules are deliberately coarse pattern matches, not a security
 // guarantee — they catch the obvious/lazy cases (a skill bundled from an
 // untrusted source with blatant prompt-injection or exfiltration text) so
-// those never reach the more expensive LLM validation stage. Mirrors the
-// seven categories the original implementation flagged.
+// those never reach the more expensive LLM validation stage. Ported
+// verbatim (same seven categories, same regex bodies translated from
+// Kotlin's java.util.regex to Go's RE2 syntax — both engines support
+// everything used here, so it's a direct transliteration) from the KMP
+// original's SkillStaticValidator.kt, so a bundle gets the same static
+// verdict regardless of which runtime validates it.
 var staticRules = []staticRule{
 	{
 		message: "possible prompt-injection phrasing",
-		pattern: regexp.MustCompile(`(?i)ignore (all |any )?(previous|prior|above) instructions`),
+		pattern: regexp.MustCompile(`(?i)ignore\b.{0,80}\b(previous|prior|system|developer)\b.{0,40}\binstructions?\b`),
 	},
 	{
-		message: "possible hardcoded credential",
-		pattern: regexp.MustCompile(`(?i)(api[_-]?key|secret|password|access[_-]?token)\s*[:=]\s*['"]?[A-Za-z0-9_\-]{16,}`),
+		message: "possible credential exfiltration",
+		pattern: regexp.MustCompile(`(?i)(api[_ -]?key|token|secret|password).{0,80}(send|upload|exfiltrat|post|curl|wget)`),
 	},
 	{
 		message: "references a private key path",
-		pattern: regexp.MustCompile(`(?i)(id_rsa|id_ed25519|id_ecdsa|\.ssh/[a-z_]+|private[_-]?key\.pem)`),
+		pattern: regexp.MustCompile(`(?i)(\.ssh|id_rsa|id_ed25519|known_hosts)`),
 	},
 	{
-		message: "dumps environment variables to output",
-		pattern: regexp.MustCompile(`(?i)\b(printenv|process\.env|os\.environ)\b[^\n]{0,40}(\||>|curl|wget)`),
+		message: "possible environment-variable dumping",
+		pattern: regexp.MustCompile(`(?i)(\bprintenv\b|\benv\b|/proc/self/environ|System\.getenv|process\.env)`),
 	},
 	{
 		message: "destructive shell command",
-		pattern: regexp.MustCompile(`(?i)\brm\s+-rf\s+/(\s|$)|\bmkfs\.\w+|\bdd\s+[^\n]*of=/dev/`),
+		pattern: regexp.MustCompile(`(?i)rm\s+-rf|chmod\s+-R\s+777|mkfs\b|dd\s+if=.*\s+of=/dev/`),
 	},
 	{
 		message: "possible network exfiltration",
-		pattern: regexp.MustCompile(`(?i)\b(curl|wget)\b[^\n]*(--upload-file|-T\s|-F\s)`),
+		pattern: regexp.MustCompile(`(?i)(curl|wget).{0,120}(--data|--data-binary|--upload-file|-T\s|\b-F\b|--form|PUT\s+https?://|POST\s+https?://)`),
 	},
 	{
-		message: "obfuscated shell execution via base64 pipe",
-		pattern: regexp.MustCompile(`(?i)base64\s+(-d|--decode)\s*\|\s*(sh|bash|zsh)\b`),
+		message: "obfuscated shell execution via decode/eval pipe",
+		pattern: regexp.MustCompile(`(?i)(base64\s+-d|openssl\s+enc|python\s+-c).{0,120}\|\s*(sh|bash|zsh)`),
 	},
 }
 

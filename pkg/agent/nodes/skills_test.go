@@ -90,6 +90,9 @@ func TestSkills_SelectedApprovedSkillInjectsContext(t *testing.T) {
 	if !strings.Contains(got.SystemPrompt, "Use the weather API.") {
 		t.Errorf("expected skill body injected, got %q", got.SystemPrompt)
 	}
+	if len(got.InvocationMeta.ActiveSkillIDs) != 1 || got.InvocationMeta.ActiveSkillIDs[0] != stored.SkillID {
+		t.Errorf("ActiveSkillIDs = %v, want [%s]", got.InvocationMeta.ActiveSkillIDs, stored.SkillID)
+	}
 }
 
 func TestSkills_UnapprovedSkillIsNotInjected(t *testing.T) {
@@ -106,6 +109,9 @@ func TestSkills_UnapprovedSkillIsNotInjected(t *testing.T) {
 	got := out.(agent.AgentContext)
 	if strings.Contains(got.SystemPrompt, skillsContextStart) {
 		t.Errorf("expected no skills context for an unapproved skill, got %q", got.SystemPrompt)
+	}
+	if len(got.InvocationMeta.ActiveSkillIDs) != 0 {
+		t.Errorf("expected no ActiveSkillIDs for an unapproved skill, got %v", got.InvocationMeta.ActiveSkillIDs)
 	}
 }
 
@@ -142,6 +148,9 @@ func TestSkills_StaleRecordTriggersRevalidation(t *testing.T) {
 	if err != nil || rec == nil || rec.Status != validation.StatusApproved {
 		t.Errorf("expected cache updated to APPROVED, got %+v, %v", rec, err)
 	}
+	if len(got.InvocationMeta.ActiveSkillIDs) != 1 || got.InvocationMeta.ActiveSkillIDs[0] != stored.SkillID {
+		t.Errorf("ActiveSkillIDs = %v, want [%s]", got.InvocationMeta.ActiveSkillIDs, stored.SkillID)
+	}
 }
 
 func TestSkills_NoSelectionStripsStaleContext(t *testing.T) {
@@ -150,7 +159,11 @@ func TestSkills_NoSelectionStripsStaleContext(t *testing.T) {
 
 	node := NewSkills(cfg)
 	staleSystemPrompt := "base prompt\n\n" + skillsContextStart + "\nstale skill instructions\n" + skillsContextEnd
-	in := agent.AgentContext{Input: "how are you?", SystemPrompt: staleSystemPrompt}
+	in := agent.AgentContext{
+		Input:          "how are you?",
+		SystemPrompt:   staleSystemPrompt,
+		InvocationMeta: agent.InvocationMeta{ActiveSkillIDs: []string{"weather-lookup"}},
+	}
 	out, err := node.Execute(context.Background(), in)
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
@@ -161,6 +174,9 @@ func TestSkills_NoSelectionStripsStaleContext(t *testing.T) {
 	}
 	if !strings.Contains(got.SystemPrompt, "base prompt") {
 		t.Errorf("expected base prompt preserved, got %q", got.SystemPrompt)
+	}
+	if len(got.InvocationMeta.ActiveSkillIDs) != 0 {
+		t.Errorf("expected stale ActiveSkillIDs cleared, got %v", got.InvocationMeta.ActiveSkillIDs)
 	}
 }
 

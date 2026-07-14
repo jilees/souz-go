@@ -36,27 +36,34 @@ type SkillsConfig struct {
 // NewSkills builds the "skills" graph node: it selects which installed
 // skills (if any) are relevant to this turn's input, ensures each selected
 // skill has a current APPROVED validation record (re-validating a STALE or
-// missing one), and injects the approved skills' instructions into
-// ctx.SystemPrompt. Execution of a skill's scripts happens later, via the
-// RunSkillCommand tool — this node only decides which skills' instructions
-// the model gets to see.
+// missing one), injects the approved skills' instructions into
+// ctx.SystemPrompt, and records their ids in
+// ctx.InvocationMeta.ActiveSkillIDs. Execution of a skill's scripts happens
+// later, via the RunSkillCommand tool, which checks a call's skillId against
+// ActiveSkillIDs — this node is what decides both which skills' instructions
+// the model gets to see *and* which skillIds RunSkillCommand will accept
+// this turn.
 //
-// It fails open: any error (registry unreadable, selection/validation LLM
-// call failing) leaves the turn unaffected, aside from clearing out any
-// stale skills-context block from a previous turn. Skills are a best-effort
-// enrichment, never a reason to fail the whole turn.
+// It fails open on the system-prompt enrichment (any error — registry
+// unreadable, selection/validation LLM call failing — leaves the turn
+// unaffected, aside from clearing out any stale skills-context block from a
+// previous turn) but always fails closed on ActiveSkillIDs: any error path
+// here leaves it empty, so a turn where skill selection couldn't run grants
+// no RunSkillCommand access rather than silently keeping a prior grant.
 func NewSkills(cfg SkillsConfig) *graph.Node {
 	return graph.NewNode("skills", func(ctx context.Context, in agent.AgentContext) (agent.AgentContext, error) {
 		out, err := activateSkills(ctx, cfg, in)
 		if err != nil {
 			out = in
 			out.SystemPrompt = stripSkillsContext(in.SystemPrompt)
+			out.InvocationMeta.ActiveSkillIDs = nil
 		}
 		return out, nil
 	})
 }
 
 type activatedSkill struct {
+	SkillID     string
 	Name        string
 	Description string
 	Version     string
@@ -108,6 +115,7 @@ func activateSkills(ctx context.Context, cfg SkillsConfig, in agent.AgentContext
 			continue
 		}
 		activated = append(activated, activatedSkill{
+			SkillID:     stored.SkillID,
 			Name:        b.Manifest.Name,
 			Description: b.Manifest.Description,
 			Version:     b.Manifest.Version,
@@ -119,8 +127,14 @@ func activateSkills(ctx context.Context, cfg SkillsConfig, in agent.AgentContext
 		return withoutSkillsContext(in), nil
 	}
 
+	activeIDs := make([]string, len(activated))
+	for i, s := range activated {
+		activeIDs[i] = s.SkillID
+	}
+
 	out := in
 	out.SystemPrompt = appendSkillsContext(stripSkillsContext(in.SystemPrompt), activated)
+	out.InvocationMeta.ActiveSkillIDs = activeIDs
 	return out, nil
 }
 
@@ -161,11 +175,12 @@ func ensureApproved(ctx context.Context, cfg SkillsConfig, stored registry.Store
 
 func withoutSkillsContext(in agent.AgentContext) agent.AgentContext {
 	stripped := stripSkillsContext(in.SystemPrompt)
-	if stripped == in.SystemPrompt {
+	if stripped == in.SystemPrompt && in.InvocationMeta.ActiveSkillIDs == nil {
 		return in
 	}
 	out := in
 	out.SystemPrompt = stripped
+	out.InvocationMeta.ActiveSkillIDs = nil
 	return out
 }
 

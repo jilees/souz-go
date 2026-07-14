@@ -3,8 +3,13 @@
 // per CLAUDE.md) — execution is a plain subprocess confined to the skill's
 // bundle directory, with a timeout and capped output, which is the
 // proportional amount of isolation for a trusted single-user embedded
-// device. The real security gate is upstream: only a skillId with a cached
-// APPROVED validation.Record for its current bundle hash may run at all.
+// device. The security gate is two-layered: a skillId must have a cached
+// APPROVED validation.Record for its current bundle hash (checked here, in
+// authorize), *and* it must be in ctx.InvocationMeta.ActiveSkillIDs — the
+// set the "skills" graph node selected as relevant to this specific turn
+// (checked in Execute). The second check is what stops an approved-but-
+// unrelated skillId from being reused as a standing license to run
+// arbitrary commands for every later turn of the conversation.
 package skills
 
 import (
@@ -68,13 +73,16 @@ func (t *RunSkillCommand) Schema() json.RawMessage {
 	}`)
 }
 
-func (t *RunSkillCommand) Execute(ctx context.Context, args map[string]json.RawMessage, _ agent.InvocationMeta) (string, error) {
+func (t *RunSkillCommand) Execute(ctx context.Context, args map[string]json.RawMessage, meta agent.InvocationMeta) (string, error) {
 	skillID, err := tools.ArgString(args, "skillId", "")
 	if err != nil {
 		return "", err
 	}
 	if skillID == "" {
 		return "", fmt.Errorf("skillId is required")
+	}
+	if !activeThisTurn(meta, skillID) {
+		return "", fmt.Errorf("skill %q is not active for this turn", skillID)
 	}
 
 	root, err := t.authorize(skillID)
@@ -140,10 +148,27 @@ func (t *RunSkillCommand) Execute(ctx context.Context, args map[string]json.RawM
 	return formatResult(result), nil
 }
 
+// activeThisTurn reports whether skillID is one the "skills" graph node
+// selected and approved for the current turn (see
+// agent.InvocationMeta.ActiveSkillIDs). This is checked before authorize so
+// a skillId that was approved at some point in the conversation, but isn't
+// relevant to what the user just asked, can't be reused as a standing
+// license to run arbitrary commands.
+func activeThisTurn(meta agent.InvocationMeta, skillID string) bool {
+	for _, id := range meta.ActiveSkillIDs {
+		if id == skillID {
+			return true
+		}
+	}
+	return false
+}
+
 // authorize resolves skillID to its bundle root, requiring a cached
-// APPROVED validation record for the skill's *current* bundle hash — this,
-// not per-turn skill activation, is the tool's security boundary. See the
-// package doc for why.
+// APPROVED validation record for the skill's *current* bundle hash. This is
+// the second half of the tool's security boundary — see activeThisTurn for
+// the first half — and stays a separate check because a skill's approval
+// can go stale (bundle hash changed, policy version bumped) independent of
+// whether it was selected for this turn.
 func (t *RunSkillCommand) authorize(skillID string) (root string, err error) {
 	stored, err := t.Registry.GetSkill(skillID)
 	if err != nil {

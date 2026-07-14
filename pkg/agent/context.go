@@ -21,6 +21,12 @@ type InvocationMeta struct {
 	RequestID      string
 	Locale         string
 	TimeZone       string
+	// ActiveSkillIDs lists the skills the "skills" node selected and
+	// approved for this turn (see nodes.NewSkills). RunSkillCommand checks
+	// a call's skillId against this list — an approved-but-not-selected
+	// skill's id is rejected, so a skill can't be invoked just because it
+	// was ever approved at some point in the conversation.
+	ActiveSkillIDs []string
 }
 
 // EventSink receives real-time execution events while a turn is in progress.

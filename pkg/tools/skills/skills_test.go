@@ -69,7 +69,7 @@ func TestRunSkillCommand_BashScript(t *testing.T) {
 		"skillId": skillID,
 		"runtime": "bash",
 		"script":  "echo hello",
-	}), agent.InvocationMeta{})
+	}), agent.InvocationMeta{ActiveSkillIDs: []string{skillID}})
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
@@ -101,7 +101,7 @@ func TestRunSkillCommand_ProcessRuntime(t *testing.T) {
 		"skillId": skillID,
 		"runtime": "process",
 		"command": []string{"echo", "argv works"},
-	}), agent.InvocationMeta{})
+	}), agent.InvocationMeta{ActiveSkillIDs: []string{skillID}})
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
@@ -125,7 +125,7 @@ func TestRunSkillCommand_EnvironmentAndSkillEnvVars(t *testing.T) {
 		"runtime":     "bash",
 		"script":      `echo "$SOUZ_SKILL_ID $CUSTOM_VAR"`,
 		"environment": map[string]string{"CUSTOM_VAR": "custom-value"},
-	}), agent.InvocationMeta{})
+	}), agent.InvocationMeta{ActiveSkillIDs: []string{skillID}})
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
@@ -149,7 +149,7 @@ func TestRunSkillCommand_Timeout(t *testing.T) {
 		"runtime":       "bash",
 		"script":        "sleep 5",
 		"timeoutMillis": 200,
-	}), agent.InvocationMeta{})
+	}), agent.InvocationMeta{ActiveSkillIDs: []string{skillID}})
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
@@ -181,7 +181,7 @@ func TestRunSkillCommand_RejectsUnapprovedSkill(t *testing.T) {
 	_, err = tool.Execute(context.Background(), rawArgs(t, map[string]any{
 		"skillId": stored.SkillID,
 		"script":  "echo should-not-run",
-	}), agent.InvocationMeta{})
+	}), agent.InvocationMeta{ActiveSkillIDs: []string{stored.SkillID}})
 	if err == nil {
 		t.Fatal("expected error for an unapproved skill")
 	}
@@ -192,9 +192,34 @@ func TestRunSkillCommand_RejectsUnknownSkill(t *testing.T) {
 	store := validation.NewStore(t.TempDir())
 	tool := New(reg, store, 1)
 
-	_, err := tool.Execute(context.Background(), rawArgs(t, map[string]any{"skillId": "ghost"}), agent.InvocationMeta{})
+	_, err := tool.Execute(context.Background(), rawArgs(t, map[string]any{"skillId": "ghost"}), agent.InvocationMeta{ActiveSkillIDs: []string{"ghost"}})
 	if err == nil {
 		t.Fatal("expected error for an unknown skill")
+	}
+}
+
+func TestRunSkillCommand_RejectsSkillNotActiveThisTurn(t *testing.T) {
+	tool, skillID := setupApprovedSkill(t)
+
+	// Approved, but not among the skills the "skills" node selected for this
+	// turn's InvocationMeta — this is the case a compromised or confused
+	// model exploits by reusing an old skillId for an unrelated command.
+	_, err := tool.Execute(context.Background(), rawArgs(t, map[string]any{
+		"skillId": skillID,
+		"script":  "echo should-not-run",
+	}), agent.InvocationMeta{ActiveSkillIDs: []string{"some-other-skill"}})
+	if err == nil {
+		t.Fatal("expected error for a skill approved but not active this turn")
+	}
+
+	// Same call with an empty ActiveSkillIDs (e.g. skill selection failed
+	// and NewSkills fell back to none) must also be rejected.
+	_, err = tool.Execute(context.Background(), rawArgs(t, map[string]any{
+		"skillId": skillID,
+		"script":  "echo should-not-run",
+	}), agent.InvocationMeta{})
+	if err == nil {
+		t.Fatal("expected error when ActiveSkillIDs is empty")
 	}
 }
 
@@ -205,7 +230,7 @@ func TestRunSkillCommand_RejectsWorkingDirectoryEscape(t *testing.T) {
 		"skillId":          skillID,
 		"script":           "echo hi",
 		"workingDirectory": "../../../../etc",
-	}), agent.InvocationMeta{})
+	}), agent.InvocationMeta{ActiveSkillIDs: []string{skillID}})
 	if err == nil {
 		t.Fatal("expected error for a workingDirectory that escapes the bundle root")
 	}
@@ -226,7 +251,7 @@ func TestRunSkillCommand_StaleValidationIsNotApproved(t *testing.T) {
 	_, err = tool.Execute(context.Background(), rawArgs(t, map[string]any{
 		"skillId": skillID,
 		"script":  "echo hi",
-	}), agent.InvocationMeta{})
+	}), agent.InvocationMeta{ActiveSkillIDs: []string{skillID}})
 	if err == nil {
 		t.Fatal("expected error for a STALE (not APPROVED) skill")
 	}
